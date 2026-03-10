@@ -187,8 +187,8 @@ llamacpp-router-agentified/
 │       ├── openai_proxy.py      # /v1/* → sub-container proxy
 │       ├── ollama_compat.py     # /api/* Ollama-compatible endpoints
 │       └── containers.py        # Container management API
-├── mcp/
-│   └── sse_server.py            # MCP SSE server with container tools
+├── mcp_local/
+│   └── sse_server.py            # MCP SSE server with container + model tools
 ├── Dockerfile
 ├── docker-compose.yml
 └── .env.example
