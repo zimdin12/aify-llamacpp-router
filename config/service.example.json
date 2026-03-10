@@ -1,22 +1,22 @@
 {
-  "name": "my-service",
-  "version": "0.1.0",
-  "description": "AI agent-accessible service with managed sub-containers",
+  "name": "llamacpp-router",
+  "version": "1.0.0",
+  "description": "Ollama-like router managing llamacpp-agentified model containers",
 
   "mcp_enabled": true,
   "mcp_path_prefix": "/mcp",
 
   "containers": {
-    "_comment": "Define sub-containers here. They are started on-demand and auto-stopped after idle.",
+    "_comment": "Model containers are generated dynamically from MODELS env var. Static containers can be defined here.",
 
     "defaults": {
-      "image": "ghcr.io/ggerganov/llama.cpp:server-cuda",
+      "image": "llamacpp-agentified:latest",
       "internal_port": 8080,
-      "idle_timeout_seconds": 300,
-      "startup_timeout_seconds": 120,
+      "idle_timeout_seconds": 600,
+      "startup_timeout_seconds": 300,
       "health_check": {
         "endpoint": "/health",
-        "interval_seconds": 10,
+        "interval_seconds": 15,
         "timeout_seconds": 5,
         "retries": 3
       },
@@ -30,7 +30,7 @@
   },
 
   "custom": {
-    "compose_project_name": "agentify",
-    "network_name": "agentify-network"
+    "compose_project_name": "llamacpp-router",
+    "network_name": "llamacpp-router-network"
   }
 }

@@ -1,0 +1,10 @@
+{
+  "repo": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
+  "filename": "mistral-7b-instruct-v0.2.Q4_K_M.gguf",
+  "context_length": 32768,
+  "gpu_layers": -1,
+  "chat_format": "mistral-instruct",
+  "description": "Mistral 7B Instruct v0.2 Q4_K_M",
+  "type": "chat",
+  "embedding_dims": null
+}

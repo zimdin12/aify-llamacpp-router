@@ -1,50 +1,47 @@
 # =============================================================================
-# Agentify Container - Docker Compose
+# llamacpp-router-agentified — Ollama-like LLM router
 # =============================================================================
-# Override ports, resources, etc. in docker-compose.override.yml
-# Include sub-services by adding them to the SUB_SERVICES env var
-# and creating their configs under ./services/<name>/docker-compose.yml
+# Manages llamacpp-agentified sub-containers, one per model.
+# Set MODELS env var to select which models to serve.
 
 services:
-  service:
+  router:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        SERVICE_PORT: ${SERVICE_PORT:-8800}
-    container_name: ${COMPOSE_PROJECT_NAME:-agentify}-service
+    container_name: ${COMPOSE_PROJECT_NAME:-llamacpp-router}-service
     restart: ${RESTART_POLICY:-unless-stopped}
     ports:
-      - "${SERVICE_PORT:-8800}:8800"
+      - "${SERVICE_PORT:-11434}:11434"
     volumes:
-      - ${DATA_VOLUME_NAME:-service-data}:/data
+      - ${DATA_VOLUME_NAME:-llamacpp-router-data}:/data
       - ./config:/app/config:ro
-      # Docker socket: allows the container manager to start/stop sub-containers
       - /var/run/docker.sock:/var/run/docker.sock:ro
     env_file:
       - .env
     environment:
-      - SERVICE_PORT=${SERVICE_PORT:-8800}
+      - SERVICE_PORT=11434
       - DATA_DIR=/data
+      - MODELS=${MODELS:-qwen3-4b}
     deploy:
       resources:
         limits:
           cpus: "${CPU_LIMIT:-2}"
-          memory: ${MEMORY_LIMIT:-4g}
+          memory: ${MEMORY_LIMIT:-2g}
     networks:
-      - service-network
+      - router-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${SERVICE_PORT:-8800}/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:11434/health"]
       interval: 30s
       timeout: 10s
-      start_period: 15s
+      start_period: 30s
       retries: 3
 
 volumes:
-  service-data:
-    name: ${DATA_VOLUME_NAME:-service-data}
+  llamacpp-router-data:
+    name: ${DATA_VOLUME_NAME:-llamacpp-router-data}
 
 networks:
-  service-network:
-    name: ${COMPOSE_PROJECT_NAME:-agentify}-network
+  router-network:
+    name: ${COMPOSE_PROJECT_NAME:-llamacpp-router}-network
     driver: bridge

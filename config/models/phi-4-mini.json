@@ -1,0 +1,10 @@
+{
+  "repo": "bartowski/phi-4-mini-instruct-GGUF",
+  "filename": "phi-4-mini-instruct-Q4_K_M.gguf",
+  "context_length": 16384,
+  "gpu_layers": -1,
+  "chat_format": "chatml",
+  "description": "Phi-4 Mini Instruct Q4_K_M - Microsoft compact model",
+  "type": "chat",
+  "embedding_dims": null
+}

@@ -1,6 +1,5 @@
 """
-Health and service info endpoints.
-Used by Docker healthchecks and by AI agents to discover the service.
+Health and service info endpoints for llamacpp-router-agentified.
 """
 
 from fastapi import APIRouter, Request
@@ -11,59 +10,55 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 async def health():
-    """Health check endpoint. Returns 200 if service is running."""
     return {"status": "healthy"}
 
 
 @router.get("/ready")
 async def ready(request: Request):
-    """Readiness check. Verifies all components are initialized."""
     checks = {}
+
+    registry = getattr(request.app.state, "model_registry", None)
+    if registry:
+        checks["models"] = [m["name"] for m in registry.list_models()]
+        checks["model_count"] = len(checks["models"])
+
     manager = getattr(request.app.state, "container_manager", None)
     if manager is not None:
         checks["container_manager"] = "initialized"
         checks["docker"] = "connected" if manager.docker else "unavailable"
+
     return {"status": "ready", "checks": checks}
 
 
 @router.get("/info")
 async def info(request: Request):
-    """
-    Service discovery endpoint for AI agents.
-    Returns everything an agent needs to use this service.
-    """
     config = get_config()
-
-    # Use request host for URLs so they work from other containers/machines
     host = request.headers.get("host", f"localhost:{config.port}")
     base = f"http://{host}"
+
+    registry = getattr(request.app.state, "model_registry", None)
+    models = registry.list_models() if registry else []
 
     response = {
         "name": config.name,
         "version": config.version,
         "description": config.description,
+        "models": models,
         "endpoints": {
-            "api": f"{base}/api/v1",
-            "docs": f"{base}/docs",
-            "openapi": f"{base}/openapi.json",
+            "openai_chat": f"{base}/v1/chat/completions",
+            "openai_completions": f"{base}/v1/completions",
+            "openai_embeddings": f"{base}/v1/embeddings",
+            "openai_models": f"{base}/v1/models",
+            "ollama_chat": f"{base}/api/chat",
+            "ollama_generate": f"{base}/api/generate",
+            "ollama_tags": f"{base}/api/tags",
             "health": f"{base}/health",
-            "ready": f"{base}/ready",
-        },
-        "integrations": {
-            "mcp_sse": f"{base}{config.mcp_path_prefix}/sse" if config.mcp_enabled else None,
-            "mcp_stdio": "See mcp/stdio/ directory for host-side MCP server",
-            "claude_code_skill": "See integrations/claude-code/SKILL.md",
-            "openclaw_plugin": "See integrations/openclaw/",
-            "open_webui_tool": "See integrations/open-webui/",
+            "docs": f"{base}/docs",
         },
     }
 
     manager = getattr(request.app.state, "container_manager", None)
     if manager is not None:
-        response["endpoints"]["containers"] = f"{base}/api/v1/containers"
-        response["endpoints"]["gpu"] = f"{base}/api/v1/gpu"
-        response["endpoints"]["route"] = f"{base}/route/{{container_name}}/{{path}}"
         response["containers"] = manager.list_containers()
-        response["groups"] = manager.get_groups()
 
     return response

@@ -1,0 +1,10 @@
+{
+  "repo": "unsloth/Qwen3-4B-GGUF",
+  "filename": "Qwen3-4B-Q4_K_M.gguf",
+  "context_length": 32768,
+  "gpu_layers": -1,
+  "chat_format": "chatml",
+  "description": "Qwen3 4B Q4_K_M - fast general purpose chat model",
+  "type": "chat",
+  "embedding_dims": null
+}
