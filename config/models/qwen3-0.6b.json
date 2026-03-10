@@ -1,0 +1,10 @@
+{
+  "repo": "Qwen/Qwen3-0.6B-GGUF",
+  "filename": "Qwen3-0.6B-Q8_0.gguf",
+  "context_length": 8192,
+  "gpu_layers": -1,
+  "chat_format": null,
+  "description": "Qwen3 0.6B Q8_0 - tiny test model",
+  "type": "chat",
+  "embedding_dims": null
+}

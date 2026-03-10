@@ -2,12 +2,15 @@
 OpenAI-compatible proxy — routes /v1/* requests to the correct llamacpp sub-container.
 """
 
+import json
 import logging
+import time
 from typing import Optional
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import StreamingResponse
+
+from service.containers.proxy import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +34,6 @@ async def _resolve_model_url(request: Request, model_name: Optional[str] = None)
     manager = _get_manager(request)
 
     if not model_name:
-        # Use first available model
         models = registry.list_models()
         if not models:
             raise HTTPException(503, "No models registered")
@@ -44,45 +46,50 @@ async def _resolve_model_url(request: Request, model_name: Optional[str] = None)
     return url
 
 
-async def _proxy_request(request: Request, target_url: str, path: str):
-    """Proxy an HTTP request to a sub-container."""
+async def _proxy_to_model(request: Request, model_name: Optional[str], path: str):
+    """Proxy request to the correct model sub-container."""
+    target_url = await _resolve_model_url(request, model_name)
+    url = f"{target_url}{path}"
+
     body = await request.body()
     headers = {
         k: v for k, v in request.headers.items()
-        if k.lower() not in ("host", "content-length", "transfer-encoding")
+        if k.lower() not in ("host", "content-length", "transfer-encoding", "connection")
     }
 
-    url = f"{target_url}{path}"
+    client = get_client()
     is_stream = b'"stream":true' in body or b'"stream": true' in body
 
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        if is_stream:
-            async with client.stream(
-                request.method, url, content=body, headers=headers
-            ) as resp:
-                if resp.status_code != 200:
-                    error_body = await resp.aread()
-                    raise HTTPException(resp.status_code, error_body.decode())
+    if is_stream:
+        req = client.build_request("POST", url, content=body, headers=headers)
+        response = await client.send(req, stream=True)
 
-                async def stream_gen():
-                    async for chunk in resp.aiter_bytes():
-                        yield chunk
+        if response.status_code != 200:
+            error_body = await response.aread()
+            await response.aclose()
+            raise HTTPException(response.status_code, error_body.decode())
 
-                return StreamingResponse(
-                    stream_gen(),
-                    status_code=resp.status_code,
-                    media_type=resp.headers.get("content-type", "text/event-stream"),
-                )
-        else:
-            resp = await client.request(
-                request.method, url, content=body, headers=headers
-            )
-            return resp.json() if resp.status_code == 200 else HTTPException(resp.status_code, resp.text)
+        async def stream_body():
+            try:
+                async for chunk in response.aiter_raw():
+                    yield chunk
+            finally:
+                await response.aclose()
+
+        return StreamingResponse(
+            stream_body(),
+            status_code=response.status_code,
+            media_type=response.headers.get("content-type", "text/event-stream"),
+        )
+    else:
+        resp = await client.post(url, content=body, headers=headers)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, resp.text)
+        return resp.json()
 
 
 @router.post("/chat/completions")
 async def chat_completions(request: Request):
-    import json
     body = await request.body()
     try:
         data = json.loads(body)
@@ -90,21 +97,20 @@ async def chat_completions(request: Request):
         raise HTTPException(400, "Invalid JSON body")
 
     model_name = data.get("model")
-    target_url = await _resolve_model_url(request, model_name)
-    # Re-create request with body (already consumed)
-    from starlette.requests import Request as StarletteRequest
+
+    # Reconstruct request with consumed body
     scope = request.scope.copy()
 
     async def receive():
         return {"type": "http.request", "body": body}
 
-    proxy_request = StarletteRequest(scope, receive)
-    return await _proxy_request(proxy_request, target_url, "/v1/chat/completions")
+    proxy_request = Request(scope, receive)
+    target_url = await _resolve_model_url(request, model_name)
+    return await _proxy_to_model(proxy_request, model_name, "/v1/chat/completions")
 
 
 @router.post("/completions")
 async def completions(request: Request):
-    import json
     body = await request.body()
     try:
         data = json.loads(body)
@@ -112,18 +118,16 @@ async def completions(request: Request):
         raise HTTPException(400, "Invalid JSON body")
 
     model_name = data.get("model")
-    target_url = await _resolve_model_url(request, model_name)
 
     async def receive():
         return {"type": "http.request", "body": body}
 
     proxy_request = Request(request.scope.copy(), receive)
-    return await _proxy_request(proxy_request, target_url, "/v1/completions")
+    return await _proxy_to_model(proxy_request, model_name, "/v1/completions")
 
 
 @router.post("/embeddings")
 async def embeddings(request: Request):
-    import json
     body = await request.body()
     try:
         data = json.loads(body)
@@ -131,19 +135,17 @@ async def embeddings(request: Request):
         raise HTTPException(400, "Invalid JSON body")
 
     model_name = data.get("model")
-    target_url = await _resolve_model_url(request, model_name)
 
     async def receive():
         return {"type": "http.request", "body": body}
 
     proxy_request = Request(request.scope.copy(), receive)
-    return await _proxy_request(proxy_request, target_url, "/v1/embeddings")
+    return await _proxy_to_model(proxy_request, model_name, "/v1/embeddings")
 
 
 @router.get("/models")
 async def list_models(request: Request):
     """List all available models across sub-containers."""
-    import time
     registry = _get_registry(request)
     models = registry.list_models()
 

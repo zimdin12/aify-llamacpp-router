@@ -31,7 +31,7 @@ client_name_var: ContextVar[str] = ContextVar("client_name", default="unknown")
 config = get_config()
 mcp_server = FastMCP(
     config.name,
-    description=config.description,
+    instructions=config.description,
 )
 
 # Reference to the FastAPI app (set during setup)
@@ -150,19 +150,48 @@ async def container_logs(name: str, tail: int = 50) -> str:
 
 
 # ---------------------------------------------------------------------------
-# TODO: Add your service-specific tools below
+# Model Tools
 # ---------------------------------------------------------------------------
-#
-# @mcp_server.tool()
-# async def generate_text(prompt: str, max_tokens: int = 512, container: str = "qwen") -> str:
-#     """Generate text using a specific LLM container."""
-#     manager = _get_manager()
-#     url = manager.resolve_url(container)
-#     async with httpx.AsyncClient(timeout=120.0) as client:
-#         resp = await client.post(f"{url}/completion", json={
-#             "prompt": prompt, "n_predict": max_tokens
-#         })
-#         return resp.json()["content"]
+
+def _get_registry():
+    """Get model registry from app state."""
+    if _app is None:
+        return None
+    return getattr(_app.state, "model_registry", None)
+
+
+@mcp_server.tool()
+async def list_models() -> dict:
+    """List all available LLM models managed by this router."""
+    registry = _get_registry()
+    if not registry:
+        return {"error": "Model registry not initialized"}
+    return {"models": registry.list_models()}
+
+
+@mcp_server.tool()
+async def chat_completion(model: str, prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> str:
+    """Send a chat completion request to a specific model. Returns the assistant's response text."""
+    registry = _get_registry()
+    manager = _get_manager()
+    if not registry:
+        return "Model registry not initialized"
+    url = registry.get_model_url(model, manager)
+    if not url:
+        available = [m["name"] for m in registry.list_models()]
+        return f"Model '{model}' not found. Available: {available}"
+
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        resp = await client.post(f"{url}/v1/chat/completions", json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        })
+        if resp.status_code != 200:
+            return f"Error {resp.status_code}: {resp.text}"
+        result = resp.json()
+        return result.get("choices", [{}])[0].get("message", {}).get("content", "")
 
 
 # ---------------------------------------------------------------------------

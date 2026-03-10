@@ -10,10 +10,11 @@ import logging
 import time
 from typing import List, Optional
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
+
+from service.containers.proxy import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -109,64 +110,67 @@ async def chat(body: OllamaChatRequest, request: Request):
         **_extract_options(body.options),
     }
 
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        if body.stream:
-            async with client.stream(
-                "POST",
-                f"{target_url}/v1/chat/completions",
-                json=openai_body,
-            ) as resp:
-                if resp.status_code != 200:
-                    error = await resp.aread()
-                    raise HTTPException(resp.status_code, error.decode())
+    client = get_client()
 
-                async def ollama_stream():
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        data = line[6:]
-                        if data == "[DONE]":
-                            # Final Ollama response
-                            yield json.dumps({
-                                "model": body.model,
-                                "done": True,
-                                "message": {"role": "assistant", "content": ""},
-                            }) + "\n"
-                            return
+    if body.stream:
+        req = client.build_request(
+            "POST", f"{target_url}/v1/chat/completions", json=openai_body,
+        )
+        response = await client.send(req, stream=True)
 
-                        try:
-                            chunk = json.loads(data)
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
-                            content = delta.get("content", "")
-                            yield json.dumps({
-                                "model": body.model,
-                                "done": False,
-                                "message": {"role": "assistant", "content": content},
-                            }) + "\n"
-                        except (json.JSONDecodeError, IndexError, KeyError):
-                            continue
+        if response.status_code != 200:
+            error = await response.aread()
+            await response.aclose()
+            raise HTTPException(response.status_code, error.decode())
 
-                return StreamingResponse(ollama_stream(), media_type="application/x-ndjson")
+        async def ollama_stream():
+            try:
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        yield json.dumps({
+                            "model": body.model,
+                            "done": True,
+                            "message": {"role": "assistant", "content": ""},
+                        }) + "\n"
+                        return
 
-        else:
-            resp = await client.post(
-                f"{target_url}/v1/chat/completions",
-                json=openai_body,
-            )
-            if resp.status_code != 200:
-                raise HTTPException(resp.status_code, resp.text)
+                    try:
+                        chunk = json.loads(data)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
+                        yield json.dumps({
+                            "model": body.model,
+                            "done": False,
+                            "message": {"role": "assistant", "content": content},
+                        }) + "\n"
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        continue
+            finally:
+                await response.aclose()
 
-            result = resp.json()
-            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-            usage = result.get("usage", {})
+        return StreamingResponse(ollama_stream(), media_type="application/x-ndjson")
 
-            return {
-                "model": body.model,
-                "done": True,
-                "message": {"role": "assistant", "content": content},
-                "eval_count": usage.get("completion_tokens", 0),
-                "prompt_eval_count": usage.get("prompt_tokens", 0),
-            }
+    else:
+        resp = await client.post(
+            f"{target_url}/v1/chat/completions", json=openai_body,
+        )
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, resp.text)
+
+        result = resp.json()
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        usage = result.get("usage", {})
+
+        return {
+            "model": body.model,
+            "done": True,
+            "message": {"role": "assistant", "content": content},
+            "eval_count": usage.get("completion_tokens", 0),
+            "prompt_eval_count": usage.get("prompt_tokens", 0),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -184,47 +188,52 @@ async def generate(body: OllamaGenerateRequest, request: Request):
         **_extract_options(body.options),
     }
 
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        if body.stream:
-            async with client.stream(
-                "POST",
-                f"{target_url}/v1/completions",
-                json=openai_body,
-            ) as resp:
-                if resp.status_code != 200:
-                    error = await resp.aread()
-                    raise HTTPException(resp.status_code, error.decode())
+    client = get_client()
 
-                async def ollama_stream():
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        data = line[6:]
-                        if data == "[DONE]":
-                            yield json.dumps({"model": body.model, "done": True, "response": ""}) + "\n"
-                            return
-                        try:
-                            chunk = json.loads(data)
-                            text = chunk.get("choices", [{}])[0].get("text", "")
-                            yield json.dumps({"model": body.model, "done": False, "response": text}) + "\n"
-                        except (json.JSONDecodeError, IndexError, KeyError):
-                            continue
+    if body.stream:
+        req = client.build_request(
+            "POST", f"{target_url}/v1/completions", json=openai_body,
+        )
+        response = await client.send(req, stream=True)
 
-                return StreamingResponse(ollama_stream(), media_type="application/x-ndjson")
+        if response.status_code != 200:
+            error = await response.aread()
+            await response.aclose()
+            raise HTTPException(response.status_code, error.decode())
 
-        else:
-            resp = await client.post(f"{target_url}/v1/completions", json=openai_body)
-            if resp.status_code != 200:
-                raise HTTPException(resp.status_code, resp.text)
+        async def ollama_stream():
+            try:
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        yield json.dumps({"model": body.model, "done": True, "response": ""}) + "\n"
+                        return
+                    try:
+                        chunk = json.loads(data)
+                        text = chunk.get("choices", [{}])[0].get("text", "")
+                        yield json.dumps({"model": body.model, "done": False, "response": text}) + "\n"
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        continue
+            finally:
+                await response.aclose()
 
-            result = resp.json()
-            text = result.get("choices", [{}])[0].get("text", "")
+        return StreamingResponse(ollama_stream(), media_type="application/x-ndjson")
 
-            return {
-                "model": body.model,
-                "done": True,
-                "response": text,
-            }
+    else:
+        resp = await client.post(f"{target_url}/v1/completions", json=openai_body)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, resp.text)
+
+        result = resp.json()
+        text = result.get("choices", [{}])[0].get("text", "")
+
+        return {
+            "model": body.model,
+            "done": True,
+            "response": text,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -237,15 +246,15 @@ async def embeddings_ollama(body: OllamaEmbeddingRequest, request: Request):
 
     openai_body = {"model": body.model, "input": body.prompt}
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(f"{target_url}/v1/embeddings", json=openai_body)
-        if resp.status_code != 200:
-            raise HTTPException(resp.status_code, resp.text)
+    client = get_client()
+    resp = await client.post(f"{target_url}/v1/embeddings", json=openai_body)
+    if resp.status_code != 200:
+        raise HTTPException(resp.status_code, resp.text)
 
-        result = resp.json()
-        embedding = result.get("data", [{}])[0].get("embedding", [])
+    result = resp.json()
+    embedding = result.get("data", [{}])[0].get("embedding", [])
 
-        return {"embedding": embedding}
+    return {"embedding": embedding}
 
 
 # ---------------------------------------------------------------------------

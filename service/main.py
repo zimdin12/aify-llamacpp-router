@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
 
     # 3. Mount MCP server if enabled
     if config.mcp_enabled:
-        from mcp.sse_server import setup_mcp_server
+        from mcp_local.sse_server import setup_mcp_server
         setup_mcp_server(app)
         logger.info(f"MCP SSE at {config.mcp_path_prefix}/sse")
 

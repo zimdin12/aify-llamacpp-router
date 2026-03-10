@@ -1,0 +1,10 @@
+{
+  "repo": "unsloth/Qwen3.5-0.8B-GGUF",
+  "filename": "Qwen3.5-0.8B-Q4_K_M.gguf",
+  "context_length": 8192,
+  "gpu_layers": -1,
+  "chat_format": "chatml",
+  "description": "Qwen3.5 0.8B Q4_K_M - tiny fast test model",
+  "type": "chat",
+  "embedding_dims": null
+}

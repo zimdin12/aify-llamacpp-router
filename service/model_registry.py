@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from service.containers.models import ContainerDefinition, HealthCheckConfig, ResourceConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -98,9 +100,9 @@ class ModelRegistry:
     def list_models(self) -> List[dict]:
         return [m.to_dict() for m in self.models.values()]
 
-    def generate_container_definitions(self) -> dict:
+    def generate_container_definitions(self) -> dict[str, ContainerDefinition]:
         """
-        Generate container definitions dict for ContainerManager.
+        Generate ContainerDefinition objects for ContainerManager.
         Each model becomes a llamacpp-agentified sub-container.
         """
         definitions = {}
@@ -122,29 +124,27 @@ class ModelRegistry:
             if hf_token:
                 env["HF_TOKEN"] = hf_token
 
-            definitions[container_name] = {
-                "image": self._llamacpp_image,
-                "environment": env,
-                "ports": {},  # internal only, router proxies
-                "volumes": {
-                    self._llamacpp_data_volume: {"bind": "/data", "mode": "rw"},
-                },
-                "network": self._network_name,
-                "healthcheck": {
-                    "test": ["CMD", "curl", "-f", "http://localhost:8080/health"],
-                    "interval": 15,
-                    "timeout": 5,
-                    "start_period": 300,
-                    "retries": 3,
-                },
-                "auto_start": True,
-                "group": "inference",
-                "internal_port": 8080,
-            }
-
             # GPU reservation
             if self._gpu_per_model > 0:
                 env["GPU_FRACTION"] = str(self._gpu_per_model)
+
+            definitions[container_name] = ContainerDefinition(
+                image=self._llamacpp_image,
+                internal_port=8080,
+                environment=env,
+                volumes={self._llamacpp_data_volume: "/data"},
+                health_check=HealthCheckConfig(
+                    endpoint="/health",
+                    interval_seconds=15,
+                    timeout_seconds=5,
+                    retries=3,
+                ),
+                resources=ResourceConfig(cpu_limit="4", memory_limit="8g"),
+                idle_timeout_seconds=600,
+                startup_timeout_seconds=600,  # model download can take a while
+                auto_start=True,
+                group="inference",
+            )
 
         return definitions
 
@@ -155,11 +155,9 @@ class ModelRegistry:
             return None
 
         if container_manager:
-            # Ask container manager for the actual URL
-            info = container_manager.get_container_info(entry.container_name)
-            if info and info.get("status") == "running":
-                # Container is on the same Docker network
-                return f"http://{entry.container_name}:8080"
+            url = container_manager.resolve_url(entry.container_name)
+            if url:
+                return url
 
         # Fallback: assume container name resolves via Docker DNS
         return f"http://{entry.container_name}:8080"
